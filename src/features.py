@@ -127,3 +127,63 @@ def get_biochemical_features(df):
     df['mut_aromatic'] = df['mut_aa'].map(AA_AROMATIC)
 
     return df
+
+
+
+
+def get_wt_seq(df):
+    '''
+    This function takes in the mutant amino acid sequence and returns the wt based 
+    on the mutation position and the wild type amino acid sequence
+
+        input: dataframe with relevant columns
+        returns: dataframe with wt_aa_seq column added
+    '''
+    df = df.copy()
+    df['wt_aa_seq'] = [
+    aa_seq[:position-1] + wt + aa_seq[position:] 
+    for aa_seq, position, wt 
+    in zip(df['aa_seq'], df['position'], df['wt_aa'])
+]
+    return df
+
+
+import torch 
+
+def get_residue_embeddings(sequences, positions, tokenizer, model, batch_size=32):
+    '''
+    Takes in amino acid sequences and specific residue position, and returns the final state embeddings for
+    the specified amino acid.
+
+        inputs: amino acid sequences
+                position of amino acid residue
+                tokenizer
+                model
+                batch_size for processing
+
+        returns: torch object of dimensionrs (len(sequence), number of final state embeddings)
+
+    '''
+
+    all_embeddings = []
+
+    for start in range(0, len(sequences), batch_size):
+        batch_sequences = sequences[start:start + batch_size]
+        batch_positions = positions[start:start + batch_size]
+
+
+        tokens = tokenizer(
+            batch_sequences,
+            return_tensors="pt",
+            padding=True)
+
+        with torch.no_grad():
+            outputs = model(**tokens)
+            
+        batch_embeddings = torch.stack([
+            outputs.last_hidden_state[i, pos, :]
+            for i, pos in enumerate(batch_positions)])
+
+        all_embeddings.append(batch_embeddings.cpu())
+
+    return torch.cat(all_embeddings, dim=0)
