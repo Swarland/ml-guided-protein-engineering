@@ -1,32 +1,11 @@
-import torch.nn as nn
-
-class EmbeddingRegressor(nn.Module):
-    def __init__(self, input_dim=320, hidden_dim1=128, hidden_dim2=32, dropout=0.2):
-        super().__init__()
-
-        self.model = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim1),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            ## Next layer
-            nn.Linear(hidden_dim1, hidden_dim2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            ## Final layer
-            nn.Linear(hidden_dim2, 1)
-        )
-
-    def forward(self, x):
-        return self.model(x).squeeze(1)
-
-
 
 import torch
+import time
 import copy
 import torch.nn as nn
-from .evaluate import evaluate_regression
+from .evaluate import evaluate_finetune
 
-def train_regression(dataloader, model, num_epochs, lr = 0.001, weight_decay = 0, validation_dataloader = None, 
+def train_finetune(dataloader, model, device, num_epochs, lr_esm = 5e-5, lr_reghead = 1e-3, weight_decay = 1e-4, validation_dataloader = None, 
 patience = None, min_delta = 0.0):
 
     """ Trains a neural network model. 
@@ -50,6 +29,8 @@ patience = None, min_delta = 0.0):
                  validation loss per epoch (if validation_dataloader is not None)
     """
 
+    model = model.to(device)
+
     ## Set model to train
     model.train()
 
@@ -66,8 +47,22 @@ patience = None, min_delta = 0.0):
     ## Define loss function, use MSE loss for regression 
     criterion = nn.MSELoss()
 
-    ## Define optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    ## Define optimizer, filter for only unfrozen weights to optimize
+    #optimizer = torch.optim.Adam(
+    #    filter(lambda p: p.requires_grad, model.parameters()),
+    #     lr = lr, weight_decay = weight_decay)
+    optimizer = torch.optim.Adam([
+    {
+        "params": model.esm.encoder.layer[-1].parameters(),
+        "lr": lr_esm
+    },
+    {
+        "params": model.regressor.parameters(),
+        "lr": lr_reghead
+    }], weight_decay=weight_decay)
+
+    ## Timing each epoch
+    start = time.time()
 
     ## Define training loop
     for epoch in range(num_epochs):
@@ -75,13 +70,27 @@ patience = None, min_delta = 0.0):
 
         total_train_loss = 0
 
-        for inputs, targets in dataloader:
+        for batch in dataloader:
+            
+            wt_tokens = {key: value.to(device) for key, value in batch['wt_tokens'].items()}
+
+            mut_tokens = {key: value.to(device) for key, value in batch['mut_tokens'].items()}
+
+            positions = batch["positions"].to(device)
+            
+            targets = batch["targets"].to(device)
+
+
 
             ## Set gradients to zero
             optimizer.zero_grad()
 
             ## Run model to get predictions
-            outputs = model(inputs)
+            outputs = model(
+                wt_tokens,
+                mut_tokens,
+                positions
+            )
 
             ## Compute loss metric 
             loss = criterion(outputs, targets)
@@ -93,23 +102,23 @@ patience = None, min_delta = 0.0):
             optimizer.step()
 
             ## Record loss
-            total_train_loss += loss.item() * inputs.size(0)
+            total_train_loss += loss.item() * targets.size(0)
 
         
-
         average_train_loss = total_train_loss / len(dataloader.dataset)
         history["train_loss"].append(average_train_loss)
         
 
         ## If validation dataloader is inputed function then calls evaluation function
         if validation_dataloader is not None:
-            validation_loss, _, _ = evaluate_regression(validation_dataloader, model)
+            validation_loss, _, _ = evaluate_finetune(validation_dataloader, model, device)
             history["validation_loss"].append(validation_loss)
 
             print(
                 f"Epoch {epoch+1}/{num_epochs} complete.", 
                 f"Train loss: {average_train_loss:.4f}",
                 f"Validation loss: {validation_loss:.4f}")
+            print("Elapsed minutes:", (time.time() - start) / 60)
 
             improved = validation_loss < (best_validation_loss - min_delta)
 
@@ -131,69 +140,9 @@ patience = None, min_delta = 0.0):
             print(
                 f"Epoch {epoch+1}/{num_epochs} complete.", 
                 f"Train loss: {average_train_loss:.4f}")
+            print("Elapsed minutes:", (time.time() - start) / 60)
 
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
     ## Return both training loss and the model
     return model, history
-
-
-
-import torch
-import torch.nn as nn
-
-class ESMDeltaGRegressor(nn.Module):
-    def __init__(self, esm_model, embedding_dim=320, hidden_dim=128, dropout=0.2):
-        super().__init__()
-
-        self.esm = esm_model
-
-        self.regressor = nn.Sequential(
-            nn.Linear(embedding_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
-        )
-
-    def forward(self, wt_tokens, mut_tokens, positions):
-        wt_outputs = self.esm(**wt_tokens)
-        mut_outputs = self.esm(**mut_tokens)
-
-        ## returns tensors with shape [batch, seq_length, 320]
-        wt_hidden = wt_outputs.last_hidden_state
-        mut_hidden = mut_outputs.last_hidden_state
-
-        batch_size = positions.shape[0]
-
-        ## Gets indices 0,1,2,etc for batch size
-        batch_idx = torch.arange(
-            batch_size,
-            device=positions.device
-        )
-
-        ## ESM adds a token at index 0, so positions works as is
-        wt_residue = wt_hidden[batch_idx, positions, :]
-        mut_residue = mut_hidden[batch_idx, positions, :]
-
-        delta_embedding = (mut_residue - wt_residue)
-
-        ## One hidden layer to generate single ddG prediction
-        predictions = self.regressor(delta_embedding)
-
-        return predictions.squeeze(1)
-
-def freeze_esm_except_last_n(model, n_layers=1):
-
-    ## Freeze all ESM parameters
-    for param in model.esm.parameters():
-        param.requires_grad = False
-
-    ## Unfreeze final n ESM encoder layers
-    for layer in model.esm.encoder.layer[-n_layers:]:
-        for param in layer.parameters():
-            param.requires_grad = True
-
-    ## Make sure regression layer is trainable
-    for param in model.regressor.parameters():
-        param.requires_grad = True
-
