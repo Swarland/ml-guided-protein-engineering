@@ -47,6 +47,33 @@ def get_residue_embeddings(sequences, positions, tokenizer, model, device, batch
 
 
 
+# def make_collate_fn(tokenizer):
+#     def collate_fn(batch):
+#         wt_sequences = [item["wt_seq"] for item in batch]
+#         mut_sequences = [item["mut_seq"] for item in batch]
+
+#         positions = torch.tensor(
+#             [item["position"] for item in batch], 
+#             dtype = torch.long) ## Torch integers
+
+#         targets = torch.stack([item["target"] for item in batch])
+        
+#         wt_tokens = tokenizer(wt_sequences, return_tensors="pt", padding=True)
+#         mut_tokens = tokenizer(mut_sequences, return_tensors="pt", padding=True)
+
+#         return {
+#             'wt_tokens' : wt_tokens,
+#              'mut_tokens' : mut_tokens, 
+#              'positions' : positions,
+#              'targets' : targets}
+    
+#     return collate_fn
+
+    
+
+
+
+
 def make_collate_fn(tokenizer):
     def collate_fn(batch):
         wt_sequences = [item["wt_seq"] for item in batch]
@@ -56,15 +83,21 @@ def make_collate_fn(tokenizer):
             [item["position"] for item in batch], 
             dtype = torch.long) ## Torch integers
 
-        targets = torch.stack([item["target"] for item in batch])
+
         
         wt_tokens = tokenizer(wt_sequences, return_tensors="pt", padding=True)
         mut_tokens = tokenizer(mut_sequences, return_tensors="pt", padding=True)
 
-        return {
-            'wt_tokens' : wt_tokens,
+        dict = {'wt_tokens' : wt_tokens,
              'mut_tokens' : mut_tokens, 
-             'positions' : positions,
-             'targets' : targets}
+             'positions' : positions}
+
+        ## only create targets column if exists
+        if 'target' in batch[0]:
+            targets = torch.stack([item["target"] for item in batch])
+
+            dict['targets'] = targets
+
+        return dict
     
     return collate_fn

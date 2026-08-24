@@ -148,42 +148,29 @@ def get_wt_seq(df):
     return df
 
 
-import torch 
 
-def get_residue_embeddings(sequences, positions, tokenizer, model, batch_size=32):
-    '''
-    Takes in amino acid sequences and specific residue position, and returns the final state embeddings for
-    the specified amino acid.
-
-        inputs: amino acid sequences
-                position of amino acid residue
-                tokenizer
-                model
-                batch_size for processing
-
-        returns: torch object of dimensionrs (len(sequence), number of final state embeddings)
+import pandas as pd
+AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
+def generate_single_mutants(wt_seq):
 
     '''
+    Takes an amino acid sequence and generates all possible mutant aa sequences.
+    Returns a pandas dataframe containing the wtseq, mutseq, mutant position and 
+    mutant type columns. The df will be (19 X (length of wt_seq)) X 4. 
+    '''
 
-    all_embeddings = []
-
-    for start in range(0, len(sequences), batch_size):
-        batch_sequences = sequences[start:start + batch_size]
-        batch_positions = positions[start:start + batch_size]
-
-
-        tokens = tokenizer(
-            batch_sequences,
-            return_tensors="pt",
-            padding=True)
-
-        with torch.no_grad():
-            outputs = model(**tokens)
+    mutants = []
+    for position, wt_aa in enumerate(wt_seq, start = 1):
+        for mut_aa in AMINO_ACIDS:
+            if mut_aa == wt_aa:
+                continue
+            else:
+                mut_seq = wt_seq[:position - 1] + mut_aa + wt_seq[position:]
             
-        batch_embeddings = torch.stack([
-            outputs.last_hidden_state[i, pos, :]
-            for i, pos in enumerate(batch_positions)])
-
-        all_embeddings.append(batch_embeddings.cpu())
-
-    return torch.cat(all_embeddings, dim=0)
+            mutants.append(
+                {'wt_aa_seq' : wt_seq,
+                'aa_seq' : mut_seq, ## keep naming convention of aa_seq to work with model
+                'position' : position,
+                'mut_type' : f"{wt_aa}{position}{mut_aa}"
+            })
+    return pd.DataFrame(mutants)

@@ -12,8 +12,12 @@ class StabilityDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
-        return {
+        item = {
             'wt_seq' : row['wt_aa_seq'],
             'mut_seq' : row['aa_seq'],
-            'position': row['position'],
-            'target': torch.tensor(row['ddG'], dtype = torch.float32)}
+            'position': row['position']}
+
+        if 'ddG' in self.df.columns:
+            item['target'] = torch.tensor(row['ddG'], dtype = torch.float32)
+
+        return item

@@ -133,3 +133,48 @@ def evaluate_finetune(dataloader, model, device):
         model.train()
 
     return average_loss, all_predictions, all_targets
+
+
+
+def evaluate_newdata(dataloader, model, device):
+
+    """ Predicts new ddG values using a trained regression neural network. 
+   
+    Takes a trained neural network model and evaluates it on given dataset
+    
+    args: 
+        dataloader (dataloder cass): PyTorch dataloader class
+        model (class): PyTorch nn.model class
+    returns:
+        average_loss (float): the average MSE Loss. 
+    """
+
+    ## Set model to evaluate
+    model.eval()
+
+    ## Initialize variables
+
+    all_predictions = []
+
+
+    ## No longer update gradients
+    with torch.no_grad():
+
+        for batch in dataloader:
+            
+            wt_tokens = {key: value.to(device) for key, value in batch['wt_tokens'].items()}
+
+            mut_tokens = {key: value.to(device) for key, value in batch['mut_tokens'].items()}
+
+            positions = batch["positions"].to(device)
+            
+            ## Get predictions
+            outputs = model(wt_tokens, mut_tokens, positions)
+
+            ## Arrays of all predictions and the correct value
+            all_predictions.append(outputs.detach().cpu())
+
+
+    all_predictions = torch.cat(all_predictions)
+
+    return all_predictions
