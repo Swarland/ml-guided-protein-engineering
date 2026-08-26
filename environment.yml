@@ -1,19 +1,19 @@
 name: protein-ml
-
 channels:
+  - defaults
   - conda-forge
-
 dependencies:
-  - python=3.12
   - pandas
-  - numpy
-  - matplotlib
-  - seaborn
-  - scikit-learn
-  - xgboost
-  - biopython
-  - biotite
-  - pytorch
   - transformers
+  - seaborn
   - jupyter
+  - xgboost
+  - pytorch
   - ipykernel
+  - matplotlib
+  - scikit-learn
+  - numpy
+  - biotite
+  - biopython
+  - python=3.12
+prefix: /Users/shanewarland/miniforge3/envs/protein-ml
